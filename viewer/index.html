@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Xem mô hình 3D</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #edf0f3; color: #253241; font: 14px system-ui, sans-serif; }
+    #stage { height: 440px; position: relative; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    #status { position: absolute; inset: 14px 16px auto; pointer-events: none; }
+    .toolbar { padding: 12px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; background: white; }
+    label { display: flex; align-items: center; gap: 7px; }
+    select, button { font: inherit; border: 1px solid #cad2db; background: white; border-radius: 6px; padding: 7px; color: inherit; }
+    button { cursor: pointer; }
+    input[type=range] { width: 95px; accent-color: #247c7b; }
+    .hint { padding: 8px 16px 12px; margin: 0; background: white; color: #596777; font-size: 12px; }
+    @media(max-width: 480px) { #stage { height: 350px; } .toolbar { gap: 10px; } }
+  </style>
+  <script type="importmap">
+    {"imports":{"three":"./vendor/three.module.js","three/addons/":"./vendor/"}}
+  </script>
+</head>
+<body>
+  <div id="stage"><div id="status" role="status">Chọn ảnh và tạo mô hình, hoặc mở GLB có sẵn.</div></div>
+  <div class="toolbar">
+    <label>Vật liệu <select id="material">
+      <option value="original">Gốc</option><option value="clay">Đất sét</option>
+      <option value="wood">Gỗ</option><option value="bronze">Đồng</option><option value="ceramic">Gốm men</option>
+    </select></label>
+    <label>Độ nhám <input id="roughness" type="range" min="0.05" max="1" step="0.01" value="1"></label>
+    <label>Độ kim loại <input id="metalness" type="range" min="0" max="1" step="0.01" value="0"></label>
+    <label>Ánh sáng <input id="exposure" type="range" min="0.3" max="2" step="0.05" value="1"></label>
+    <label><input id="rotate" type="checkbox">Tự xoay</label>
+    <button id="reset" type="button">Đặt lại góc nhìn</button>
+  </div>
+  <p class="hint">Kéo để xoay · Cuộn để phóng to · Chuột phải để di chuyển. Vật liệu và ánh sáng ở đây dùng để xem trước.</p>
+  <script type="module" src="./viewer.js"></script>
+</body>
+</html>

@@ -1,0 +1,99 @@
+ẢNH THÀNH 3D — BẢN DÙNG THỬ TRÊN MÁY NÀY
+
+Mở Mo-app.cmd bằng nhấp đúp. Giao diện mở tại http://127.0.0.1:7860.
+Nếu app đang chạy, tệp khởi động sẽ mở lại giao diện.
+Lần đầu khởi động có thể cần chờ để nạp thư viện.
+
+1. Chọn ảnh JPG hoặc PNG có một vật thể rõ ràng.
+2. Giữ Tách nền tự động nếu ảnh có nền. Có thể tắt nếu ảnh đã có nền xám sạch.
+3. Chọn Nhanh (192), Chi tiết (256) hoặc Tối đa (384), rồi bấm Tạo mô hình 3D.
+   Độ nổi chi tiết từ ảnh mặc định 1,5. Đặt 0 để tắt, trên 1,5 dễ sinh vết gấp.
+   Chiếu màu ảnh gốc lên mặt trước: bật mặc định, mặt trước lấy màu thẳng từ ảnh.
+4. Khung Three.js: kéo chuột để xoay, cuộn để phóng to, chuột phải để di chuyển.
+   Chọn vật liệu Gốc, Đất sét, Gỗ, Đồng hoặc Gốm men, chỉnh độ nhám,
+   độ kim loại, ánh sáng và tự xoay ngay dưới khung 3D.
+   Các tùy chỉnh này áp dụng cho xem trước. Tệp tải về dùng vật liệu lúc tạo.
+   Có thể mở GLB cũ bằng ô "Mở GLB có sẵn để xem".
+5. Chuyển giữa Đất sét và Có màu để kiểm tra hình khối và màu bề mặt.
+6. Lưu model.glb hoặc model.obj. GLB chứa texture khi bật Tạo texture UV.
+   OBJ giữ màu trên đỉnh. Có thể mở Điều chỉnh bề mặt để xem ảnh đã tách nền.
+   Open3D mặc định làm sạch lưới trước khi tạo UV. Có thể tắt trong Điều chỉnh
+   bề mặt. Làm mượt nốt sần áp dụng nhẹ cho cả Hunyuan và TripoSR.
+   Ngưỡng mặc định là 25. Giảm nhẹ nếu phần mảnh bị mất, rồi tạo lại để so sánh.
+
+Mỗi kết quả nằm trong results, gồm ảnh gốc đã thu nhỏ tối đa 2048 px,
+ảnh đã xử lý, GLB, OBJ, geometry.glb để xem đất sét và metrics.json ghi thời gian và bộ nhớ.
+Khi bật texture UV, texture.png lưu màu 1024 px ở mức Nhanh, 2048 px ở hai mức còn lại.
+Kết quả cũ được giữ lại. Lượt thất bại có error.txt để tra cứu.
+
+Máy đã cài Python 3.10, PyTorch CPU, TripoSR và tải đủ trọng số cùng U2Net.
+Trọng số AI khoảng 1,84 GB. Giao diện và xử lý chạy trên máy.
+Giữ nguyên vị trí thư mục vì môi trường Python được cài cho đường dẫn hiện tại.
+Đóng cửa sổ chạy app để dừng khi khởi động bằng Mo-app.cmd.
+
+MÔ HÌNH HÌNH KHỐI (từ 23/11/2026)
+Mặc định: "Hunyuan mini + TripoSR".
+- Hunyuan3D-2mini-Turbo dựng hình khối, đoán hông, lưng, bệ đúng hơn TripoSR nhiều.
+  Chạy CPU, ảnh mã hoá 518 px, 5 bước. Ảnh 1022 px (mặc định của Hunyuan) chậm gấp 5
+  và làm lưng thành tấm phẳng nên không dùng.
+- TripoSR chạy kèm ở lưới thô 128 để lấy kích thước và vị trí.
+- Mặt trước lấy màu thẳng từ ảnh; phần khuất được lan màu từ ảnh (nghiệm Laplace)
+  nên cùng tông, không loang.
+- Seed (trong Điều chỉnh bề mặt): đổi số để Hunyuan đoán lại phần khuất.
+Đo trên i5-12400, mức Chi tiết: khoảng 130–145 giây, RAM tiến trình đỉnh khoảng 13,5 GiB.
+Sau lần chạy đầu, Hunyuan nằm sẵn trong RAM (~9 GiB) cho các lần sau.
+Chọn "TripoSR" nếu cần nhanh (~75 giây, ~5 GiB) và chấp nhận phần khuất kém.
+Cần: thư mục Hunyuan3D-2 (mã nguồn chính thức) và models/hunyuan3d-2mini (~4 GB).
+
+CHI TIẾT BẰNG NORMAL MAP + BÓNG HỐC (bật mặc định, thêm ~7 giây, không tăng RAM)
+Lưới xuất giữ ~100k mặt, chi tiết được bake vào texture 2048:
+1. normal.png lấy hướng bề mặt từ lưới Hunyuan đầy đủ (~500k mặt) — có cả lưng, hông;
+2. cộng vân khắc từ độ sâu ảnh ở mặt trước (theo thanh Độ nổi chi tiết);
+3. bóng hốc từ độ cong lưới đầy đủ làm tối nhẹ các rãnh trong texture màu
+   và trong bản đất sét (geometry.glb cũng có normal map).
+GLB theo chuẩn glTF, đã kiểm tra trong Blender. OBJ không mang normal map.
+Thiếu một trong hai thì app tự dùng TripoSR.
+
+CẢI TIẾN CHẤT LƯỢNG (23/11/2026)
+TripoSR chỉ mô tả hình khối trên triplane 64x64, nên lưới 384/512 cũ không thêm
+chi tiết thật. Bản hiện tại thay vào đó:
+- Tách nền bằng BiRefNet-lite (sạch viền, chân đế hơn u2net; ~9 giây CPU).
+  Nếu thiếu tệp models/rembg/birefnet-general-lite.onnx thì tự dùng u2net.
+- Làm mượt Taubin để bỏ nốt sần của marching cubes.
+- Depth Anything V2 Small (models/depth, ~100 MB) ước lượng độ sâu từ ảnh, chỉ phần
+  chi tiết nhỏ hơn một ô triplane được cộng vào mặt nhìn thấy từ camera (~3 giây).
+- Chiếu màu ảnh gốc lên texture ở các bề mặt nhìn thẳng camera.
+- Sửa lỗi pháp tuyến bị lật vào trong khi lưới hở.
+Mặt sau và hai bên vẫn do TripoSR suy đoán. Ảnh gốc càng lớn (từ 1024 px) càng tốt.
+Ảnh so sánh nằm trong thư mục so-sanh.
+
+Đo trên ảnh tượng (gốc 452x679 px):
+Chi tiết 256 + texture 2K — khoảng 72–82 giây, RAM tiến trình khoảng 5 GiB.
+Tối đa 384 + texture 2K — khoảng 144 giây, RAM khoảng 5 GiB, chi tiết hơn nhưng
+còn vài vết gấp mảnh.
+
+Số đo cũ (trước cải tiến), trên i5-12400 và RAM 32 GiB.
+Ảnh tượng, Chi tiết 384 và texture 2K — khoảng 149 giây, RAM tiến trình khoảng 4 GiB.
+Ảnh tượng, Tối đa 512 và texture 2K — khoảng 276 giây, RAM tiến trình khoảng 4,46 GiB.
+Mức 512 tạo 253.832 mặt lưới trên ảnh tượng.
+Lưới 384 tạo 140.930 mặt trên ảnh tượng, so với 35.382 mặt ở thiết lập 192 cũ.
+Thời gian thay đổi theo ảnh và tải của máy, lần khởi động đầu có thể lâu hơn.
+Phép thử xử lý offline chặn kết nối từ tiến trình ra ngoài và tạo được cả GLB/OBJ.
+
+GLB hỗ trợ UV và texture màu. Hình dạng mặt khuất do AI suy đoán từ một ảnh.
+Mức Chi tiết tăng độ phân giải lưới, chất lượng còn tùy vật thể và góc chụp.
+Độ phân giải texture mô tả kích thước ảnh màu xuất ra. Hoa văn nhỏ và khuôn mặt
+còn phụ thuộc khả năng TripoSR suy luận từ ảnh gốc.
+
+Nguồn mô hình và mã nền
+https://github.com/VAST-AI-Research/TripoSR
+https://huggingface.co/stabilityai/TripoSR
+Giấy phép mã nền được giữ trong TripoSR/LICENSE.
+
+Điều chỉnh cho Windows CPU
+Dùng scikit-image marching cubes thay torchmcubes để tránh biên dịch C++/CUDA.
+Đọc cấu hình DINO từ models/dino/config.json để hoạt động offline.
+Chuyển trục Z-up sang Y-up khi xuất, chỉnh hướng pháp tuyến bề mặt.
+Lấy mẫu hình khối theo từng phần để giới hạn RAM khi dùng lưới 384–512.
+Dùng xatlas và OpenGL của Intel UHD 730 để tạo atlas UV và texture trên máy.
+requirements-lock.txt ghi các phiên bản thư viện đã cài.

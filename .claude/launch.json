@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "anh-thanh-3d-test",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-X", "utf8", "-c", "from app import run; run(inbrowser=False, port=7861)"],
+      "port": 7861
+    }
+  ]
+}
