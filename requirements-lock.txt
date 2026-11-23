@@ -1,3 +1,5 @@
+--find-links ./third_party/wheels
+
 aiofiles==23.2.1
 annotated-doc==0.0.6
 annotated-types==0.8.0
@@ -33,6 +35,7 @@ glcontext==2.5.0
 gradio==4.44.1
 gradio-client==1.3.0
 h11==0.16.0
+halfmesh==0.5.1
 httpcore==1.0.9
 httpx==0.27.2
 huggingface-hub==0.25.2

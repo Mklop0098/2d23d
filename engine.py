@@ -29,6 +29,9 @@ import detail
 import hunyuan_shape
 import surface_detail
 from mesh_cleanup import clean_mesh
+from spot_processing import SPOT_MODES, process_spot
+from topology_repair import HALFMESH_MODES, repair_topology
+from meshlab_processing import SMOOTHING_METHODS, MESHLAB_VERSION, smooth_with_meshlab, measure_surface_deviation
 
 torch.set_num_threads(6)
 _model = None
@@ -46,7 +49,11 @@ HUNYUAN_CELL = 2 * 0.87 / 128  # Hunyuan giữ được chi tiết mịn hơn tr
 
 def generate(image_path, remove_background=True, quality='Chi tiết', report=None,
              texture=True, threshold=25.0, relief=1.5, smooth=True, photo_texture=True,
-             shape_model=SHAPE_MODELS[0], seed=1234, normal_detail=True, mesh_cleanup=True):
+             shape_model=SHAPE_MODELS[0], seed=1234, normal_detail=True, mesh_cleanup=True,
+             spot_mode=SPOT_MODES[1], spot_threshold=3.5, spot_max_displacement=0.25,
+             halfmesh_mode=HALFMESH_MODES[1], max_hole_edges=12,
+             smoothing_method=SMOOTHING_METHODS[1], meshlab_angle=45.0, meshlab_iterations=1,
+             measure_deviation=True):
     if not image_path:
         raise ValueError('Hãy chọn ảnh JPG hoặc PNG.')
     if quality not in QUALITY:
@@ -57,10 +64,29 @@ def generate(image_path, remove_background=True, quality='Chi tiết', report=No
         raise ValueError('Độ nổi chi tiết phải nằm trong khoảng 0–2.')
     if shape_model not in SHAPE_MODELS:
         raise ValueError('Mô hình hình khối không hợp lệ.')
+    if spot_mode not in SPOT_MODES:
+        raise ValueError('Chế độ Spot không hợp lệ.')
+    if not 1 <= float(spot_threshold) <= 20:
+        raise ValueError('Ngưỡng Spot phải nằm trong khoảng 1–20.')
+    if not 0.05 <= float(spot_max_displacement) <= 1:
+        raise ValueError('Giới hạn dịch chuyển Spot phải nằm trong khoảng 0,05–1.')
+    if halfmesh_mode not in HALFMESH_MODES:
+        raise ValueError('Chế độ halfmesh không hợp lệ.')
+    if not 3 <= float(max_hole_edges) <= 128 or not float(max_hole_edges).is_integer():
+        raise ValueError('Giới hạn vá lỗ phải là số nguyên trong khoảng 3–128 cạnh.')
+    if smoothing_method not in SMOOTHING_METHODS:
+        raise ValueError('Bộ lọc làm mượt không hợp lệ.')
+    if not 0 <= float(meshlab_angle) <= 90:
+        raise ValueError('Góc giữ cạnh MeshLab phải nằm trong khoảng 0–90 độ.')
+    if not 1 <= float(meshlab_iterations) <= 5 or not float(meshlab_iterations).is_integer():
+        raise ValueError('Số lượt lọc MeshLab phải là số nguyên từ 1 đến 5.')
     with _lock:
         return _generate(image_path, remove_background, quality, report or (lambda text: None),
                          texture, float(threshold), float(relief), bool(smooth), bool(photo_texture),
-                         shape_model, int(seed), bool(normal_detail), bool(mesh_cleanup))
+                         shape_model, int(seed), bool(normal_detail), bool(mesh_cleanup),
+                         spot_mode, float(spot_threshold), float(spot_max_displacement),
+                         halfmesh_mode, int(max_hole_edges), smoothing_method, float(meshlab_angle),
+                         int(meshlab_iterations), bool(measure_deviation))
 
 
 def _texture_image(values):
@@ -92,7 +118,9 @@ def _background_session_for():
 
 
 def _generate(image_path, remove_background, quality, report, texture, threshold,
-              relief, smooth, photo_texture, shape_model, seed, normal_detail, mesh_cleanup):
+              relief, smooth, photo_texture, shape_model, seed, normal_detail, mesh_cleanup,
+              spot_mode, spot_threshold, spot_max_displacement, halfmesh_mode, max_hole_edges,
+              smoothing_method, meshlab_angle, meshlab_iterations, measure_deviation):
     global _model, _background_session
     started = time.perf_counter()
     process = psutil.Process()
@@ -175,16 +203,90 @@ def _generate(image_path, remove_background, quality, report, texture, threshold
             del shape, shape_full
             cell = HUNYUAN_CELL
             timings['hunyuan_seconds'] = round(time.perf_counter() - tick, 2)
-        elif smooth and not mesh_cleanup:
+        topology_info = None
+        if halfmesh_mode != HALFMESH_MODES[0]:
+            report('Đang sửa cấu trúc lưới bằng halfmesh')
+            tick = time.perf_counter()
+            mesh, topology_info = repair_topology(mesh, halfmesh_mode, max_hole_edges)
+            _orient_outward(mesh)
+            if use_hunyuan and texture and normal_detail:
+                report('Đang sửa cấu trúc lưới bake normal bằng halfmesh')
+                high, topology_info['high_mesh'] = repair_topology(high, halfmesh_mode, max_hole_edges)
+                _orient_outward(high)
+            timings['halfmesh_seconds'] = round(time.perf_counter() - tick, 2)
+            (folder / 'halfmesh-report.json').write_text(json.dumps(topology_info, indent=2), encoding='utf-8')
+        use_meshlab_smoothing = smooth and smoothing_method == SMOOTHING_METHODS[1]
+        meshlab_info = None
+        before_filtering = None
+        if use_meshlab_smoothing or measure_deviation:
+            before_filtering = mesh.copy()
+            meshlab_info = {'version': MESHLAB_VERSION, 'smoothing_applied': use_meshlab_smoothing,
+                            'smoothing_method': smoothing_method, 'measurement': None,
+                            'reference_stage': 'after_halfmesh_before_smoothing_and_spot',
+                            'comparison_stage': 'after_smoothing_and_spot_before_relief'}
+        if smooth and not mesh_cleanup and not use_meshlab_smoothing:
             # Taubin bỏ nốt sần của marching cubes mà không làm co hình khối.
-            trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu=-0.53, iterations=6)
+            trimesh.smoothing.filter_taubin(mesh, lamb=0.5, nu=-0.53, iterations=2 if use_hunyuan else 6)
         cleanup_info = None
         if mesh_cleanup:
             report('Đang làm sạch lưới bằng Open3D')
             tick = time.perf_counter()
-            mesh, cleanup_info = clean_mesh(mesh, smooth=smooth, iterations=2 if use_hunyuan else 6)
+            mesh, cleanup_info = clean_mesh(mesh, smooth=smooth and not use_meshlab_smoothing,
+                                            iterations=2 if use_hunyuan else 6,
+                                            merge_vertices=halfmesh_mode == HALFMESH_MODES[0])
             _orient_outward(mesh)
             timings['mesh_cleanup_seconds'] = round(time.perf_counter() - tick, 2)
+        if use_meshlab_smoothing:
+            report('Đang làm mượt giữ cạnh bằng MeshLab')
+            tick = time.perf_counter()
+            mesh, meshlab_info['low_mesh'] = smooth_with_meshlab(mesh, meshlab_angle, meshlab_iterations)
+            _orient_outward(mesh)
+            if use_hunyuan and texture and normal_detail:
+                report('Đang làm mượt giữ cạnh trên lưới bake normal')
+                high, meshlab_info['high_mesh'] = smooth_with_meshlab(high, meshlab_angle, meshlab_iterations)
+                _orient_outward(high)
+            timings['meshlab_smoothing_seconds'] = round(time.perf_counter() - tick, 2)
+        spot_info = None
+        if spot_mode != SPOT_MODES[0]:
+            report('Đang phát hiện điểm nghi lỗi bằng Spot')
+            tick = time.perf_counter()
+            mesh, spot_report, spot_before, spot_after = process_spot(
+                mesh, spot_mode, spot_threshold, spot_max_displacement)
+            (folder / 'spot-report.json').write_text(json.dumps(spot_report, indent=2), encoding='utf-8')
+            spot_info = {'mode': spot_mode, 'status': spot_report['integration']['status'],
+                         **spot_report['summary']}
+            if spot_info['status'] == 'skipped':
+                spot_info['reason'] = spot_report['integration']['reason']
+            else:
+                _orient_outward(mesh)
+                orientation = trimesh.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0])
+                for preview, name in ((spot_before, 'spot-before.glb'), (spot_after, 'spot-after.glb')):
+                    preview.apply_transform(orientation)
+                    preview.export(folder / name)
+            if use_hunyuan and texture and normal_detail and spot_mode == SPOT_MODES[2]:
+                report('Đang sửa điểm nghi lỗi trên lưới bake normal bằng Spot')
+                high, high_report, _, _ = process_spot(
+                    high, spot_mode, spot_threshold, spot_max_displacement, previews=False)
+                _orient_outward(high)
+                (folder / 'spot-high-report.json').write_text(json.dumps(high_report, indent=2), encoding='utf-8')
+                spot_info['high_mesh'] = {'status': high_report['integration']['status'],
+                                          **high_report['summary']}
+            timings['spot_seconds'] = round(time.perf_counter() - tick, 2)
+        if meshlab_info is not None:
+            if measure_deviation:
+                report('Đang đo độ lệch bề mặt trước và sau xử lý')
+                tick = time.perf_counter()
+                meshlab_info['measurement'] = measure_surface_deviation(before_filtering, mesh)
+                timings['meshlab_measurement_seconds'] = round(time.perf_counter() - tick, 2)
+            orientation = trimesh.transformations.rotation_matrix(-math.pi / 2, [1, 0, 0])
+            for preview, name in ((before_filtering, 'meshlab-before.glb'), (mesh.copy(), 'meshlab-after.glb')):
+                preview.visual = trimesh.visual.TextureVisuals(
+                    material=trimesh.visual.material.PBRMaterial(
+                        baseColorFactor=[190, 190, 190, 255], metallicFactor=0, roughnessFactor=0.8))
+                preview.apply_transform(orientation)
+                preview.export(folder / name)
+            (folder / 'meshlab-report.json').write_text(json.dumps(meshlab_info, indent=2), encoding='utf-8')
+            del before_filtering, preview
         if not use_hunyuan:
             high = mesh.copy()  # TripoSR: pháp tuyến gốc trước khi cộng chi tiết từ ảnh
         relief_info = None
@@ -287,8 +389,11 @@ def _generate(image_path, remove_background, quality, report, texture, threshold
             'background_model': _background_session[0] if remove_background and _background_session else None,
             'shape_model': SHAPE_MODELS[0] if use_hunyuan else SHAPE_MODELS[1],
             'seed': seed if use_hunyuan else None, 'shape_note': shape_note,
-            'smooth': smooth and (mesh_cleanup or not use_hunyuan), 'relief': relief_info,
+            'smooth': smooth, 'relief': relief_info,
             'mesh_cleanup': cleanup_info,
+            'halfmesh': topology_info,
+            'meshlab': meshlab_info,
+            'spot': spot_info,
             'normal_detail': bool(texture and normal_detail),
             'photo_texture': bool(texture and photo_texture and relief_map is not None), **timings,
         }
@@ -314,5 +419,17 @@ if __name__ == '__main__':
                                seed=int(options.get('seed', 1234)),
                                normal_detail='--no-normal' not in sys.argv,
                                mesh_cleanup='--no-cleanup' not in sys.argv,
+                               spot_mode={'off': SPOT_MODES[0], 'detect': SPOT_MODES[1],
+                                          'fix': SPOT_MODES[2]}[options.get('spot', 'detect')],
+                               spot_threshold=float(options.get('spot-threshold', 3.5)),
+                               spot_max_displacement=float(options.get('spot-max-displacement', 0.25)),
+                               halfmesh_mode={'off': HALFMESH_MODES[0], 'repair': HALFMESH_MODES[1],
+                                              'fill': HALFMESH_MODES[2]}[options.get('halfmesh', 'repair')],
+                               max_hole_edges=int(options.get('hole-edges', 12)),
+                               smoothing_method={'taubin': SMOOTHING_METHODS[0],
+                                                 'meshlab': SMOOTHING_METHODS[1]}[options.get('smoothing', 'meshlab')],
+                               meshlab_angle=float(options.get('meshlab-angle', 45)),
+                               meshlab_iterations=int(options.get('meshlab-iterations', 1)),
+                               measure_deviation='--no-measure-deviation' not in sys.argv,
                                report=lambda text: print(text, flush=True))
     print(json.dumps({'folder': str(folder), **metrics}), flush=True)

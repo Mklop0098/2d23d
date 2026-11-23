@@ -10,6 +10,47 @@ const roughness = document.querySelector('#roughness');
 const metalness = document.querySelector('#metalness');
 const exposure = document.querySelector('#exposure');
 const rotate = document.querySelector('#rotate');
+document.querySelector('#retry').addEventListener('click', () => window.location.reload());
+let renderer;
+let controls;
+let environment;
+let resizeObserver;
+let disposed = false;
+
+function disposeViewer() {
+  disposed = true;
+  resizeObserver?.disconnect();
+  controls?.dispose();
+  environment?.dispose();
+  resizeObserver = undefined;
+  controls = undefined;
+  environment = undefined;
+  if (renderer) {
+    renderer.setAnimationLoop(null);
+    renderer.dispose();
+    renderer.forceContextLoss();
+    renderer = undefined;
+  }
+}
+window.addEventListener('pagehide', disposeViewer, { once: true });
+
+async function createRenderer() {
+  const profiles = [
+    { antialias: true, powerPreference: 'default' },
+    { antialias: false, powerPreference: 'low-power' },
+  ];
+  let reason = '';
+  for (const profile of profiles) {
+    const canvas = document.createElement('canvas');
+    canvas.addEventListener('webglcontextcreationerror', (event) => { reason = event.statusMessage; });
+    const context = canvas.getContext('webgl2', { ...profile, failIfMajorPerformanceCaveat: false });
+    if (context) return new THREE.WebGLRenderer({ canvas, context, ...profile });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  const error = new Error(reason || 'WebGL 2 context unavailable');
+  error.name = 'WebGLUnavailableError';
+  throw error;
+}
 const presets = {
   clay: { color: 0xd3c7b7, roughness: 0.85, metalness: 0, texture: false },
   wood: { color: 0xffffff, roughness: 0.68, metalness: 0, texture: true },
@@ -18,8 +59,10 @@ const presets = {
 };
 
 try {
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer = await createRenderer();
+  if (disposed) throw new DOMException('Viewer closed', 'AbortError');
+  const antialias = renderer.getContext().getContextAttributes().antialias;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, antialias ? 2 : 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.shadowMap.enabled = true;
@@ -27,19 +70,30 @@ try {
   stage.appendChild(renderer.domElement);
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
-    status.textContent = 'Khung 3D bị mất kết nối đồ họa. Tải lại trang để tiếp tục.';
+    if (!disposed) {
+      status.textContent = '';
+      document.querySelector('#error-panel').hidden = false;
+      document.querySelector('#error-message').textContent = 'Kết nối đồ họa bị gián đoạn. Bạn có thể thử lại khung 3D.';
+      document.querySelector('#graphics-help').hidden = false;
+      document.querySelector('#error-detail').textContent = 'WebGL context lost';
+    }
+  });
+  renderer.domElement.addEventListener('webglcontextrestored', () => {
+    if (disposed) return;
+    document.querySelector('#error-panel').hidden = true;
+    status.textContent = document.body.dataset.loaded === 'true' ? '' : 'Kết nối đồ họa đã khôi phục.';
   });
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xedf0f3);
   const pmrem = new THREE.PMREMGenerator(renderer);
   const room = new RoomEnvironment();
-  const environment = pmrem.fromScene(room, 0.04);
+  environment = pmrem.fromScene(room, 0.04);
   scene.environment = environment.texture;
   room.dispose();
   pmrem.dispose();
 
   const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
-  const controls = new OrbitControls(camera, renderer.domElement);
+  controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.minDistance = 0.5;
   controls.maxDistance = 12;
@@ -47,7 +101,8 @@ try {
   const key = new THREE.DirectionalLight(0xfff1dd, 3);
   key.position.set(3, 5, 4);
   key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
+  const shadowSize = antialias ? 2048 : 1024;
+  key.shadow.mapSize.set(shadowSize, shadowSize);
   Object.assign(key.shadow.camera, { left: -3, right: 3, top: 3, bottom: -3, near: 0.1, far: 20 });
   key.shadow.normalBias = 0.015;
   scene.add(key);
@@ -106,11 +161,12 @@ try {
   exposure.addEventListener('input', () => { renderer.toneMappingExposure = Number(exposure.value); });
   rotate.addEventListener('change', () => { controls.autoRotate = rotate.checked; });
   document.querySelector('#reset').addEventListener('click', resetCamera);
-  new ResizeObserver(() => {
+  resizeObserver = new ResizeObserver(() => {
     camera.aspect = stage.clientWidth / Math.max(stage.clientHeight, 1);
     camera.updateProjectionMatrix();
     renderer.setSize(stage.clientWidth, stage.clientHeight);
-  }).observe(stage);
+  });
+  resizeObserver.observe(stage);
   resetCamera();
   renderer.setAnimationLoop(() => {
     controls.update();
@@ -125,6 +181,7 @@ try {
     if (asset.origin !== window.location.origin) throw new Error('Đường dẫn mô hình phải thuộc ứng dụng này.');
     status.textContent = 'Đang tải mô hình…';
     const gltf = await new GLTFLoader().loadAsync(asset.href);
+    if (disposed) throw new DOMException('Viewer closed', 'AbortError');
     model = gltf.scene;
     const bounds = new THREE.Box3().setFromObject(model);
     const size = bounds.getSize(new THREE.Vector3());
@@ -143,10 +200,29 @@ try {
       const originals = Array.isArray(object.material) ? object.material : [object.material];
       const copies = originals.map((original) => {
         const material = original.clone();
-        materials.push({ material, original: original.clone() });
+        if (params.get('spot') === '1') {
+          material.metalness = 0;
+          material.roughness = 0.85;
+        }
+        materials.push({ material, original: material.clone() });
         return material;
       });
       object.material = Array.isArray(object.material) ? copies : copies[0];
+      if (params.get('spot') === '1') {
+        const colors = object.geometry.getAttribute('color');
+        const positions = object.geometry.getAttribute('position');
+        const flagged = [];
+        for (let index = 0; index < positions.count; index++) {
+          if (colors && colors.getX(index) > 0.8 && colors.getY(index) < 0.4) {
+            flagged.push(positions.getX(index), positions.getY(index), positions.getZ(index));
+          }
+        }
+        const markers = new THREE.BufferGeometry();
+        markers.setAttribute('position', new THREE.Float32BufferAttribute(flagged, 3));
+        object.add(new THREE.Points(markers, new THREE.PointsMaterial({
+          color: 0xf03728, size: 4, sizeAttenuation: false, depthWrite: false,
+        })));
+      }
     });
     scene.add(group);
     materialSelect.value = params.get('clay') === '1' ? 'clay' : 'original';
@@ -154,14 +230,20 @@ try {
     status.textContent = '';
     document.body.dataset.loaded = 'true';
   }
-  window.addEventListener('pagehide', () => {
-    renderer.setAnimationLoop(null);
-    controls.dispose();
-    environment.dispose();
-    renderer.dispose();
-  }, { once: true });
 } catch (error) {
-  console.error(error);
-  status.textContent = `Không mở được khung 3D. ${error.message}`;
-  document.body.dataset.error = error.message;
+  disposeViewer();
+  if (error.name !== 'AbortError') {
+    console.error(error);
+    status.textContent = '';
+    document.querySelector('#error-panel').hidden = false;
+    const webglError = error.name === 'WebGLUnavailableError';
+    document.querySelector('#error-message').textContent = webglError
+      ? 'Trình duyệt chưa tạo được kết nối đồ họa WebGL 2 để xem mô hình.'
+      : `Không mở được khung 3D. ${error.message}`;
+    document.querySelector('#graphics-help').hidden = !webglError;
+    document.querySelector('#error-detail').textContent = error.message;
+    document.querySelector('.toolbar').hidden = true;
+    document.querySelector('.hint').hidden = true;
+    document.body.dataset.error = error.message;
+  }
 }

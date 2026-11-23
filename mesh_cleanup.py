@@ -3,7 +3,7 @@ import numpy as np
 import trimesh
 
 
-def clean_mesh(mesh, smooth=True, iterations=2):
+def clean_mesh(mesh, smooth=True, iterations=2, merge_vertices=True):
     import open3d as o3d
 
     geometry = o3d.geometry.TriangleMesh(
@@ -14,7 +14,9 @@ def clean_mesh(mesh, smooth=True, iterations=2):
         geometry.vertex_colors = o3d.utility.Vector3dVector(
             np.asarray(mesh.visual.vertex_colors)[:, :3] / 255.0)
     before = len(geometry.triangles)
-    geometry.remove_duplicated_vertices()
+    # halfmesh can deliberately split vertices to repair disconnected surface fans.
+    if merge_vertices:
+        geometry.remove_duplicated_vertices()
     geometry.remove_duplicated_triangles()
     geometry.remove_degenerate_triangles()
     geometry.remove_unreferenced_vertices()
@@ -34,4 +36,4 @@ def clean_mesh(mesh, smooth=True, iterations=2):
         vertex_normals=np.asarray(geometry.vertex_normals).copy(),
         vertex_colors=colors, process=False)
     return result, {'faces_before': before, 'faces_after': len(result.faces),
-                    'smooth_iterations': iterations if smooth else 0}
+                    'smooth_iterations': iterations if smooth else 0, 'merge_vertices': merge_vertices}

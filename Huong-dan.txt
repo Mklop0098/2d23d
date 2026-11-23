@@ -14,11 +14,32 @@ Lần đầu khởi động có thể cần chờ để nạp thư viện.
    độ kim loại, ánh sáng và tự xoay ngay dưới khung 3D.
    Các tùy chỉnh này áp dụng cho xem trước. Tệp tải về dùng vật liệu lúc tạo.
    Có thể mở GLB cũ bằng ô "Mở GLB có sẵn để xem".
+   Nếu trình duyệt báo lỗi WebGL, bấm Thử lại khung 3D. Nếu vẫn lỗi, bật tăng tốc
+   đồ họa trong Cài đặt Chrome → Hệ thống, lưu công việc rồi khởi động lại Chrome.
 5. Chuyển giữa Đất sét và Có màu để kiểm tra hình khối và màu bề mặt.
 6. Lưu model.glb hoặc model.obj. GLB chứa texture khi bật Tạo texture UV.
    OBJ giữ màu trên đỉnh. Có thể mở Điều chỉnh bề mặt để xem ảnh đã tách nền.
    Open3D mặc định làm sạch lưới trước khi tạo UV. Có thể tắt trong Điều chỉnh
    bề mặt. Làm mượt nốt sần áp dụng nhẹ cho cả Hunyuan và TripoSR.
+   halfmesh mặc định sửa cấu trúc lưới trước Spot và trước khi tạo UV.
+   Chọn Sửa cấu trúc và vá lỗ nhỏ khi cần, giới hạn mặc định 12 cạnh mỗi lỗ.
+   Các khoảng trống thật cũng có thể bị vá. halfmesh-report.json ghi số đỉnh,
+   mặt, lỗ đã vá và độ kín của lưới chính cùng lưới bake normal.
+   Khi tắt texture, màu của đỉnh được chuyển từ đỉnh gần nhất sau sửa lưới.
+   Bộ lọc làm mượt mặc định MeshLab giữ cạnh, 1 lượt, góc 45 độ.
+   Có thể chọn Taubin hoặc tắt Làm mượt nốt sần trong Điều chỉnh bề mặt.
+   Chọn MeshLab trước xử lý / sau xử lý để so sánh hình trước và sau làm mượt
+   cùng Spot, ở giai đoạn trước khi cộng chi tiết từ ảnh.
+   Đo độ lệch bề mặt ghi ước lượng khoảng cách hai chiều từ các đỉnh tới bề mặt
+   vào meshlab-report.json. Tỷ lệ phần trăm dùng đường chéo khung bao làm chuẩn.
+   Spot mặc định Chỉ phát hiện. Chọn Spot trước sửa / Spot sau sửa ở Cách xem
+   để xem các đỉnh nghi lỗi màu đỏ trên lưới trước khi cộng chi tiết từ ảnh.
+   Muốn sửa, chọn Sửa điểm nghi lỗi trong Điều chỉnh bề mặt rồi tạo lại.
+   Giới hạn dịch chuyển mặc định 0,25 bán kính lân cận. Chi tiết nhọn thật
+   cũng có thể bị đánh dấu. Tăng ngưỡng để giảm số điểm nghi lỗi.
+   spot-report.json ghi điểm phát hiện và dịch chuyển trong hệ tọa độ AI.
+   Khi sửa Hunyuan có normal map, Spot xử lý thêm lưới bake, ghi
+   spot-high-report.json. Lưới không phù hợp sẽ được bỏ qua và ghi lý do.
    Ngưỡng mặc định là 25. Giảm nhẹ nếu phần mảnh bị mất, rồi tạo lại để so sánh.
 
 Mỗi kết quả nằm trong results, gồm ảnh gốc đã thu nhỏ tối đa 2048 px,
@@ -97,3 +118,5 @@ Chuyển trục Z-up sang Y-up khi xuất, chỉnh hướng pháp tuyến bề m
 Lấy mẫu hình khối theo từng phần để giới hạn RAM khi dùng lưới 384–512.
 Dùng xatlas và OpenGL của Intel UHD 730 để tạo atlas UV và texture trên máy.
 requirements-lock.txt ghi các phiên bản thư viện đã cài.
+halfmesh dùng bản wheel Windows 64-bit cho Python 3.10 trong third_party/wheels.
+requirements-lock.txt trỏ tới thư mục này khi cài lại thư viện.
